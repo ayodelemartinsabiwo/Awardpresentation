@@ -234,7 +234,7 @@ export default function App() {
             
             <button
               onClick={() => setIsEditorOpen(true)}
-              className="group bg-orange-600/80 hover:bg-orange-600 text-white px-4 py-3 rounded-lg transition-all duration-300 backdrop-blur-sm flex items-center gap-2"
+              className="group bg-blue-600/80 hover:bg-blue-600 text-white px-4 py-3 rounded-lg transition-all duration-300 backdrop-blur-sm flex items-center gap-2"
             >
               <Edit className="w-5 h-5 flex-shrink-0" />
               <span className="whitespace-nowrap font-medium">
