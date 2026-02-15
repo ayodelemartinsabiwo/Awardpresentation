@@ -94,6 +94,28 @@ app.post("/make-server-b6556629/awardees", async (c) => {
   }
 });
 
+// Batch save awardees (faster for multiple updates)
+app.post("/make-server-b6556629/awardees/batch", async (c) => {
+  try {
+    const { awardees } = await c.req.json();
+    
+    if (!Array.isArray(awardees)) {
+      return c.json({ error: 'awardees must be an array' }, 400);
+    }
+    
+    // Use mset for batch operation - it expects two separate arrays
+    const keys = awardees.map(awardee => `awardee:${awardee.id}`);
+    const values = awardees;
+    
+    await kv.mset(keys, values);
+    
+    return c.json({ success: true, count: awardees.length });
+  } catch (error) {
+    console.log(`Error batch saving awardees: ${error}`);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
 // Delete an awardee
 app.delete("/make-server-b6556629/awardees/:id", async (c) => {
   try {
@@ -160,6 +182,29 @@ app.post("/make-server-b6556629/upload-photo", async (c) => {
     });
   } catch (error) {
     console.log(`Error uploading photo: ${error}`);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Get custom categories
+app.get("/make-server-b6556629/custom-categories", async (c) => {
+  try {
+    const categories = await kv.get("custom_categories");
+    return c.json({ categories: categories || [] });
+  } catch (error) {
+    console.log(`Error fetching custom categories: ${error}`);
+    return c.json({ error: String(error) }, 500);
+  }
+});
+
+// Save custom categories
+app.post("/make-server-b6556629/custom-categories", async (c) => {
+  try {
+    const { categories } = await c.req.json();
+    await kv.set("custom_categories", categories);
+    return c.json({ success: true, categories });
+  } catch (error) {
+    console.log(`Error saving custom categories: ${error}`);
     return c.json({ error: String(error) }, 500);
   }
 });

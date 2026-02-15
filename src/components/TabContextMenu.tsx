@@ -24,14 +24,23 @@ export function TabContextMenu({
   onClose
 }: TabContextMenuProps) {
   useEffect(() => {
-    const handleClickOutside = () => onClose();
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Don't close if clicking inside the context menu
+      if (!target.closest('.context-menu-container')) {
+        onClose();
+      }
+    };
     const handleEscape = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
     };
 
-    document.addEventListener('click', handleClickOutside);
-    document.addEventListener('contextmenu', handleClickOutside);
-    document.addEventListener('keydown', handleEscape);
+    // Small delay to prevent immediate closure
+    setTimeout(() => {
+      document.addEventListener('click', handleClickOutside);
+      document.addEventListener('contextmenu', handleClickOutside);
+      document.addEventListener('keydown', handleEscape);
+    }, 0);
 
     return () => {
       document.removeEventListener('click', handleClickOutside);
@@ -73,7 +82,7 @@ export function TabContextMenu({
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
       transition={{ duration: 0.1 }}
-      className="fixed bg-slate-800 rounded-lg shadow-2xl border border-slate-700 py-1 min-w-[180px] z-[60]"
+      className="fixed bg-slate-800 rounded-lg shadow-2xl border border-slate-700 py-1 min-w-[180px] z-[60] context-menu-container"
       style={{
         left: `${x}px`,
         top: `${y}px`

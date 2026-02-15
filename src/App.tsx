@@ -15,8 +15,9 @@ interface Awardee {
   category: string;
   photo: string;
   photoPath?: string;
-  brandLogo?: string;
-  brandLogoPath?: string;
+  organizationLogo?: string;
+  organizationLogoPath?: string;
+  organizationLogoSize?: 'small' | 'medium';
   selectedIcon?: string;
   logoBadgeColor?: string;
   photoScale?: number;
@@ -36,6 +37,15 @@ interface Awardee {
     showCategory?: boolean;
     showDescription?: boolean;
     showDate?: boolean;
+  };
+  layout?: {
+    photo?: { x: number; y: number; width: number; height: number };
+    name?: { x: number; y: number; width: number; height: number };
+    title?: { x: number; y: number; width: number; height: number };
+    category?: { x: number; y: number; width: number; height: number };
+    description?: { x: number; y: number; width: number; height: number };
+    date?: { x: number; y: number; width: number; height: number };
+    logo?: { x: number; y: number };
   };
 }
 
@@ -89,6 +99,10 @@ export default function App() {
   const [isEditorOpen, setIsEditorOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [isPreviewMode, setIsPreviewMode] = useState(false);
+  const [editorPanelWidth, setEditorPanelWidth] = useState(Math.max(600, window.innerWidth * 0.25));
+  const [isLayoutEditMode, setIsLayoutEditMode] = useState(false);
+  const [layoutEditSlideIndex, setLayoutEditSlideIndex] = useState(0);
+  const [layoutUpdateHandler, setLayoutUpdateHandler] = useState<((elementId: string, position: { x: number; y: number }, size: { width: number; height: number }) => void) | null>(null);
 
   // Load awardees from database on mount
   useEffect(() => {
@@ -118,6 +132,13 @@ export default function App() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isEditorOpen, isPreviewMode, currentSlide, awardees.length]);
+
+  // Sync current slide with layout edit slide when layout mode is enabled
+  useEffect(() => {
+    if (isLayoutEditMode && layoutEditSlideIndex !== currentSlide) {
+      setCurrentSlide(layoutEditSlideIndex);
+    }
+  }, [isLayoutEditMode, layoutEditSlideIndex]);
 
   const loadAwardees = async () => {
     try {
@@ -184,11 +205,22 @@ export default function App() {
 
   const handleUpdate = (updatedAwardees: Awardee[]) => {
     setAwardees(updatedAwardees);
-    setIsEditorOpen(false);
+    // Don't close the editor panel - let users close it manually
     // Adjust current slide if needed
     if (currentSlide >= updatedAwardees.length) {
       setCurrentSlide(Math.max(0, updatedAwardees.length - 1));
     }
+  };
+
+  const handleLayoutModeChange = (
+    isEditMode: boolean,
+    activeSlideIndex: number,
+    onLayoutUpdate: (elementId: string, position: { x: number; y: number }, size: { width: number; height: number }) => void
+  ) => {
+    setIsLayoutEditMode(isEditMode);
+    setLayoutEditSlideIndex(activeSlideIndex);
+    setCurrentSlide(activeSlideIndex); // Sync the current slide with the active tab
+    setLayoutUpdateHandler(() => onLayoutUpdate);
   };
 
   const nextSlide = () => {
@@ -204,6 +236,17 @@ export default function App() {
     ? awardees.filter(awardee => !awardee.isHidden)
     : awardees;
 
+  // Calculate scale factor for edit preview based on available width
+  const calculateScale = () => {
+    if (!isEditorOpen) return 1;
+    const availableWidth = window.innerWidth - editorPanelWidth;
+    const baseWidth = window.innerWidth * 0.85; // 85vw when editor closed
+    const scale = Math.max(0.5, Math.min(1, availableWidth / baseWidth));
+    return scale;
+  };
+
+  const previewScale = calculateScale();
+
   if (loading) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center">
@@ -213,88 +256,121 @@ export default function App() {
   }
 
   return (
-    <div className={`h-screen overflow-hidden bg-slate-900 flex items-center justify-center ${isPreviewMode ? 'p-0' : 'p-4'}`}>
+    <div className={`h-screen overflow-hidden bg-slate-900 ${isPreviewMode ? '' : 'flex'}`}>
       {/* Edit Mode Container with Header */}
       {!isPreviewMode ? (
-        <div className="w-[85vw] h-full flex flex-col gap-4 py-4">
-          {/* Header with buttons */}
-          <div className="flex items-center justify-between px-6 py-4 bg-slate-800/50 rounded-xl backdrop-blur-sm border border-slate-700/50 flex-shrink-0">
-            <button
-              onClick={() => setIsPreviewMode(true)}
-              className="group bg-emerald-600/80 hover:bg-emerald-600 text-white px-4 py-3 rounded-lg transition-all duration-300 backdrop-blur-sm flex items-center gap-2"
-            >
-              <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
-              <span className="whitespace-nowrap font-medium">
-                Presentation Preview
-              </span>
-            </button>
-            
-            <button
-              onClick={() => setIsEditorOpen(true)}
-              className="group bg-orange-600/80 hover:bg-orange-600 text-white px-4 py-3 rounded-lg transition-all duration-300 backdrop-blur-sm flex items-center gap-2"
-            >
-              <Edit className="w-5 h-5 flex-shrink-0" />
-              <span className="whitespace-nowrap font-medium">
-                Edit Awards
-              </span>
-            </button>
-          </div>
-
-          {/* Presentation slide container - 16:9 aspect ratio */}
-          <div className="relative bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl shadow-2xl flex-1 min-h-0"
-            style={{ 
-              aspectRatio: '16/9'
+        <>
+          {/* Preview Area - Takes available space on the left */}
+          <div 
+            className="transition-all duration-300"
+            style={{
+              width: isEditorOpen ? `calc(100vw - ${editorPanelWidth}px)` : '100vw',
+              height: '100vh',
+              padding: isEditorOpen ? '4px' : '24px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
             }}
           >
-            {/* Current award slide */}
-            <AwardCard 
-              awardee={awardees[currentSlide]} 
-              slideNumber={currentSlide + 1}
-              totalSlides={awardees.length}
-              isPreviewMode={isPreviewMode}
-            />
-
-            {/* Navigation controls - Only show if not at boundaries */}
-            {currentSlide > 0 && (
+            {/* Header with buttons */}
+            <div 
+              className="flex items-center justify-between bg-slate-800/50 rounded-xl backdrop-blur-sm border border-slate-700/50 flex-shrink-0 transition-all duration-300 gap-2 md:gap-4 flex-wrap md:flex-nowrap"
+              style={{
+                padding: isEditorOpen ? '12px 16px' : '16px 24px'
+              }}
+            >
               <button
-                onClick={prevSlide}
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition-all z-10 hover:scale-110"
-                aria-label="Previous slide"
+                onClick={() => setIsPreviewMode(true)}
+                className="group bg-emerald-600/80 hover:bg-emerald-600 text-white px-3 md:px-4 py-2 md:py-3 rounded-lg transition-all duration-300 backdrop-blur-sm flex items-center gap-2 text-sm md:text-base flex-1 md:flex-initial justify-center"
               >
-                <ChevronLeft className="w-8 h-8" strokeWidth={2.5} />
+                <svg className="w-4 h-4 md:w-5 md:h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                <span className="whitespace-nowrap font-medium hidden sm:inline">
+                  Presentation Preview
+                </span>
+                <span className="whitespace-nowrap font-medium sm:hidden">
+                  Preview
+                </span>
               </button>
-            )}
-
-            {currentSlide < awardees.length - 1 && (
+              
               <button
-                onClick={nextSlide}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition-all z-10 hover:scale-110"
-                aria-label="Next slide"
+                onClick={() => setIsEditorOpen(true)}
+                className="group bg-blue-600/80 hover:bg-blue-600 text-white px-3 md:px-4 py-2 md:py-3 rounded-lg transition-all duration-300 backdrop-blur-sm flex items-center gap-2 text-sm md:text-base flex-1 md:flex-initial justify-center"
               >
-                <ChevronRight className="w-8 h-8" strokeWidth={2.5} />
+                <Edit className="w-4 h-4 md:w-5 md:h-5 flex-shrink-0" />
+                <span className="whitespace-nowrap font-medium hidden sm:inline">
+                  Edit Awards
+                </span>
+                <span className="whitespace-nowrap font-medium sm:hidden">
+                  Edit
+                </span>
               </button>
-            )}
+            </div>
 
-            {/* Slide indicators */}
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-10">
-              {awardees.map((_, index) => (
+            {/* Presentation slide container - 16:9 aspect ratio */}
+            <div 
+              className="relative bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl shadow-2xl overflow-hidden flex-1"
+              style={{ 
+                maxHeight: 'calc(100vh - 80px)'
+              }}
+            >
+              {/* Current award slide */}
+              <AwardCard 
+                awardee={awardees[currentSlide]} 
+                slideNumber={currentSlide + 1}
+                totalSlides={awardees.length}
+                isPreviewMode={isPreviewMode}
+                isLayoutEditMode={isLayoutEditMode}
+                onLayoutUpdate={layoutUpdateHandler || undefined}
+              />
+
+              {/* Navigation controls - Only show if not at boundaries and not in preview mode */}
+              {!isPreviewMode && currentSlide > 0 && (
                 <button
-                  key={index}
-                  onClick={() => setCurrentSlide(index)}
-                  className={`w-3 h-3 rounded-full transition-all ${
-                    index === currentSlide
-                      ? 'bg-white w-8'
-                      : 'bg-white/40 hover:bg-white/60'
-                  }`}
-                  aria-label={`Go to slide ${index + 1}`}
-                />
-              ))}
+                  onClick={prevSlide}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition-all z-10 hover:scale-110"
+                  aria-label="Previous slide"
+                >
+                  <ChevronLeft className="w-8 h-8" strokeWidth={2.5} />
+                </button>
+              )}
+
+              {!isPreviewMode && currentSlide < awardees.length - 1 && (
+                <button
+                  onClick={nextSlide}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-white/70 hover:text-white transition-all z-10 hover:scale-110"
+                  aria-label="Next slide"
+                >
+                  <ChevronRight className="w-8 h-8" strokeWidth={2.5} />
+                </button>
+              )}
+
+              {/* Slide indicators - disabled in layout edit mode */}
+              {!isLayoutEditMode && (
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-1.5 sm:gap-2 z-10">
+                  {awardees.map((_, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setCurrentSlide(index)}
+                      className={`rounded-full transition-all ${
+                        index === currentSlide
+                          ? 'bg-white'
+                          : 'bg-white/30 hover:bg-white/50'
+                      }`}
+                      style={{
+                        width: index === currentSlide ? (window.innerWidth < 640 ? '24px' : '32px') : (window.innerWidth < 640 ? '8px' : '12px'),
+                        height: window.innerWidth < 640 ? '8px' : '12px'
+                      }}
+                      aria-label={`Go to slide ${index + 1}`}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
-        </div>
+        </>
       ) : (
         /* Preview Mode - Fullscreen */
         <div className="w-full h-screen relative bg-gradient-to-br from-slate-800 to-slate-900">
@@ -307,16 +383,20 @@ export default function App() {
           />
 
           {/* Slide indicators */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2 z-10">
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-1.5 sm:gap-2 z-10">
             {visibleAwardees.map((_, index) => (
               <button
                 key={index}
                 onClick={() => setCurrentSlide(index)}
-                className={`w-3 h-3 rounded-full transition-all ${
+                className={`rounded-full transition-all ${
                   index === currentSlide
-                    ? 'bg-white w-8'
-                    : 'bg-white/40 hover:bg-white/60'
+                    ? 'bg-white'
+                    : 'bg-white/30 hover:bg-white/50'
                 }`}
+                style={{
+                  width: index === currentSlide ? (window.innerWidth < 640 ? '24px' : '32px') : (window.innerWidth < 640 ? '8px' : '12px'),
+                  height: window.innerWidth < 640 ? '8px' : '12px'
+                }}
                 aria-label={`Go to slide ${index + 1}`}
               />
             ))}
@@ -330,17 +410,10 @@ export default function App() {
           awardees={awardees}
           onUpdate={handleUpdate}
           onClose={() => setIsEditorOpen(false)}
+          onWidthChange={(width) => setEditorPanelWidth(width)}
+          onLayoutModeChange={handleLayoutModeChange}
         />
       )}
-
-      {/* Fixed Logo - Bottom Right */}
-      <div className={`fixed bottom-6 right-6 pointer-events-none ${isEditorOpen ? 'z-10' : 'z-50'}`}>
-        <img 
-          src={logoImage} 
-          alt="Organization Logo" 
-          className="w-20 h-20 object-contain drop-shadow-lg"
-        />
-      </div>
     </div>
   );
 }

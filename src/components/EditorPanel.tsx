@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { X, Upload, Save, Trash2, Plus, Image as ImageIcon, Star, Trophy, Award, Sparkles, GripVertical, Copy, Edit2, Eye, EyeOff } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { X, Upload, Save, Trash2, Plus, Image as ImageIcon, Star, Trophy, Award, Sparkles, GripVertical, Copy, Edit2, Eye, EyeOff, Check } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { TabContextMenu } from './TabContextMenu';
@@ -14,8 +14,9 @@ interface Awardee {
   category: string;
   photo: string;
   photoPath?: string;
-  brandLogo?: string;
-  brandLogoPath?: string;
+  organizationLogo?: string;
+  organizationLogoPath?: string;
+  organizationLogoSize?: 'small' | 'medium';
   selectedIcon?: string;
   logoBadgeColor?: string;
   photoScale?: number;
@@ -36,12 +37,23 @@ interface Awardee {
     showDescription?: boolean;
     showDate?: boolean;
   };
+  layout?: {
+    photo?: { x: number; y: number; width: number; height: number };
+    name?: { x: number; y: number; width: number; height: number };
+    title?: { x: number; y: number; width: number; height: number };
+    category?: { x: number; y: number; width: number; height: number };
+    description?: { x: number; y: number; width: number; height: number };
+    date?: { x: number; y: number; width: number; height: number };
+    logo?: { x: number; y: number };
+  };
 }
 
 interface EditorPanelProps {
   awardees: Awardee[];
   onUpdate: (awardees: Awardee[]) => void;
   onClose: () => void;
+  onWidthChange?: (width: number) => void;
+  onLayoutModeChange?: (isEditMode: boolean, activeSlideIndex: number, onLayoutUpdate: (elementId: string, position: { x: number; y: number }, size: { width: number; height: number }) => void) => void;
 }
 
 const categories = [
@@ -50,7 +62,7 @@ const categories = [
   'Celebrate Success'
 ];
 
-export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
+export function EditorPanel({ awardees, onUpdate, onClose, onWidthChange, onLayoutModeChange }: EditorPanelProps) {
   const [editingAwardees, setEditingAwardees] = useState<Awardee[]>(awardees);
   const [activeTab, setActiveTab] = useState(0);
   const [isSaving, setIsSaving] = useState(false);
@@ -62,8 +74,66 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; index: number } | null>(null);
   const [renamingIndex, setRenamingIndex] = useState<number | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
+  const [panelWidth, setPanelWidth] = useState(Math.max(600, window.innerWidth * 0.25));
+  const [isResizing, setIsResizing] = useState(false);
+  const [isSaved, setIsSaved] = useState(false);
+  const [applyLogoToAll, setApplyLogoToAll] = useState(false);
+  const [applySizeToAll, setApplySizeToAll] = useState(false);
+  const [isLayoutEditMode, setIsLayoutEditMode] = useState(true); // Always enabled by default
+  const [copyLayoutToAll, setCopyLayoutToAll] = useState(false);
+  const initializedSlidesRef = useRef<Set<number>>(new Set());
 
-  const allCategories = [...categories];
+  const allCategories = [...categories, ...customCategories];
+
+  // Helper function to update awardees both locally and trigger real-time preview update
+  const updateAwardees = (updated: Awardee[]) => {
+    setEditingAwardees(updated);
+    onUpdate(updated); // Real-time update to preview
+    setIsSaved(false); // Mark as unsaved when changes are made
+  };
+
+  // Sync with external awardees changes
+  useEffect(() => {
+    setEditingAwardees(awardees);
+    // Clear initialization tracking when awardees change from outside
+    initializedSlidesRef.current.clear();
+  }, [awardees]);
+
+  // Load custom categories on mount
+  useEffect(() => {
+    const loadCustomCategories = async () => {
+      try {
+        const response = await fetch(
+          `https://${projectId}.supabase.co/functions/v1/make-server-b6556629/custom-categories`,
+          {
+            headers: {
+              'Authorization': `Bearer ${publicAnonKey}`
+            }
+          }
+        );
+        
+        if (response.ok) {
+          const data = await response.json();
+          if (data.categories && Array.isArray(data.categories)) {
+            setCustomCategories(data.categories);
+          }
+        } else {
+          console.error('Failed to load custom categories:', response.status, response.statusText);
+        }
+      } catch (error) {
+        console.error('Failed to load custom categories:', error);
+        // Don't show error to user on load, just use empty array
+      } finally {
+        setIsLoadingCategories(false);
+      }
+    };
+
+    loadCustomCategories();
+  }, []);
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
     setDraggedIndex(index);
@@ -98,7 +168,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
     // Insert at new position
     newAwardees.splice(dropIndex, 0, draggedItem);
     
-    setEditingAwardees(newAwardees);
+    updateAwardees(newAwardees);
     
     // Update active tab to follow the moved item
     if (activeTab === draggedIndex) {
@@ -121,7 +191,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
   const handleFieldChange = (index: number, field: keyof Awardee, value: string) => {
     const updated = [...editingAwardees];
     updated[index] = { ...updated[index], [field]: value };
-    setEditingAwardees(updated);
+    updateAwardees(updated);
   };
 
   const handlePhotoUpload = async (index: number, file: File) => {
@@ -150,7 +220,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
           photo: data.photoUrl,
           photoPath: data.photoPath
         };
-        setEditingAwardees(updated);
+        updateAwardees(updated);
       } else {
         alert('Failed to upload photo: ' + data.error);
       }
@@ -162,7 +232,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
     }
   };
 
-  const handleBrandLogoUpload = async (index: number, file: File) => {
+  const handleOrganizationLogoUpload = async (index: number, file: File) => {
     setUploading(true);
     try {
       const formData = new FormData();
@@ -183,12 +253,25 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
       
       if (data.success) {
         const updated = [...editingAwardees];
-        updated[index] = { 
-          ...updated[index], 
-          brandLogo: data.photoUrl,
-          brandLogoPath: data.photoPath
-        };
-        setEditingAwardees(updated);
+        
+        if (applyLogoToAll && index === 0) {
+          // Apply to all slides if checkbox is checked and uploading to Slide 1
+          updated.forEach((awardee, i) => {
+            updated[i] = {
+              ...updated[i],
+              organizationLogo: data.photoUrl,
+              organizationLogoPath: data.photoPath
+            };
+          });
+        } else {
+          // Apply only to current slide
+          updated[index] = { 
+            ...updated[index], 
+            organizationLogo: data.photoUrl,
+            organizationLogoPath: data.photoPath
+          };
+        }
+        updateAwardees(updated);
       } else {
         alert('Failed to upload logo: ' + data.error);
       }
@@ -199,6 +282,111 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
       setUploading(false);
     }
   };
+
+  const handleApplyLogoToAllChange = (checked: boolean) => {
+    setApplyLogoToAll(checked);
+    
+    if (checked && editingAwardees.length > 0) {
+      // Apply Slide 1's logo to all slides
+      const firstSlideLogo = editingAwardees[0].organizationLogo;
+      const firstSlideLogoPath = editingAwardees[0].organizationLogoPath;
+      
+      const updated = editingAwardees.map((awardee) => ({
+        ...awardee,
+        organizationLogo: firstSlideLogo,
+        organizationLogoPath: firstSlideLogoPath
+      }));
+      
+      updateAwardees(updated);
+    }
+  };
+
+  const handleApplySizeToAllChange = (checked: boolean) => {
+    setApplySizeToAll(checked);
+    
+    if (checked && editingAwardees.length > 0) {
+      // Apply current slide's size to all slides
+      const currentSize = editingAwardees[activeTab].organizationLogoSize || 'medium';
+      
+      const updated = editingAwardees.map((awardee) => ({
+        ...awardee,
+        organizationLogoSize: currentSize
+      }));
+      
+      updateAwardees(updated);
+    }
+  };
+
+  const handleLogoSizeChange = (size: 'small' | 'medium') => {
+    if (applySizeToAll) {
+      // Apply to all slides
+      const updated = editingAwardees.map((awardee) => ({
+        ...awardee,
+        organizationLogoSize: size
+      }));
+      updateAwardees(updated);
+    } else {
+      // Apply only to current slide
+      handleFieldChange(activeTab, 'organizationLogoSize', size);
+    }
+  };
+
+  const handleResetLayout = () => {
+    const updated = [...editingAwardees];
+    updated[activeTab] = {
+      ...updated[activeTab],
+      layout: undefined
+    };
+    updateAwardees(updated);
+  };
+
+  const handleCopyLayoutToAllChange = (checked: boolean) => {
+    setCopyLayoutToAll(checked);
+    
+    if (checked && editingAwardees.length > 0) {
+      // Apply Slide 1's layout to all slides
+      const firstSlideLayout = editingAwardees[0].layout;
+      
+      const updated = editingAwardees.map((awardee) => ({
+        ...awardee,
+        layout: firstSlideLayout ? { ...firstSlideLayout } : undefined
+      }));
+      
+      updateAwardees(updated);
+    }
+  };
+
+  const handleLayoutUpdate = (elementId: string, position: { x: number; y: number }, size: { width: number; height: number }) => {
+    const updated = [...editingAwardees];
+    const currentLayout = updated[activeTab].layout || {};
+    
+    if (copyLayoutToAll && activeTab === 0) {
+      // Apply to all slides
+      updated.forEach((_, i) => {
+        const layout = updated[i].layout || {};
+        updated[i] = {
+          ...updated[i],
+          layout: {
+            ...layout,
+            [elementId]: { x: position.x, y: position.y, width: size.width, height: size.height }
+          }
+        };
+      });
+    } else {
+      // Apply only to current slide
+      updated[activeTab] = {
+        ...updated[activeTab],
+        layout: {
+          ...currentLayout,
+          [elementId]: { x: position.x, y: position.y, width: size.width, height: size.height }
+        }
+      };
+    }
+    
+    updateAwardees(updated);
+  };
+
+
 
   const handleAddAwardee = () => {
     const newId = Math.max(...editingAwardees.map(a => a.id), 0) + 1;
@@ -212,18 +400,19 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
       category: 'Act as Owner',
       photo: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=400&h=400&fit=crop'
     };
-    setEditingAwardees([...editingAwardees, newAwardee]);
+    updateAwardees([...editingAwardees, newAwardee]);
     setActiveTab(editingAwardees.length);
   };
 
   const handleDeleteAwardee = (index: number) => {
     setDeleteConfirmIndex(index);
+    setContextMenu(null);
   };
 
   const confirmDelete = () => {
     if (deleteConfirmIndex !== null) {
       const updated = editingAwardees.filter((_, i) => i !== deleteConfirmIndex);
-      setEditingAwardees(updated);
+      updateAwardees(updated);
       if (activeTab >= updated.length) {
         setActiveTab(Math.max(0, updated.length - 1));
       }
@@ -271,29 +460,51 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
         })
       );
 
-      // Save all current awardees
-      await Promise.all(
-        editingAwardees.map(async (awardee, index) => {
-          const response = await fetch(
-            `https://${projectId}.supabase.co/functions/v1/make-server-b6556629/awardees`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${publicAnonKey}`
-              },
-              body: JSON.stringify({ ...awardee, order: index })
-            }
-          );
-          
-          if (!response.ok) {
-            throw new Error(`Failed to save awardee ${awardee.id}`);
-          }
-        })
+      // Batch save all awardees for faster performance
+      const awardeesWithOrder = editingAwardees.map((awardee, index) => ({
+        ...awardee,
+        order: index
+      }));
+
+      const batchResponse = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-b6556629/awardees/batch`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${publicAnonKey}`
+          },
+          body: JSON.stringify({ awardees: awardeesWithOrder })
+        }
       );
+      
+      if (!batchResponse.ok) {
+        const errorData = await batchResponse.json().catch(() => ({ error: 'Unknown error' }));
+        throw new Error(`Failed to save awardees: ${errorData.error || batchResponse.statusText}`);
+      }
+
+      // Save custom categories
+      const catResponse = await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-b6556629/custom-categories`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${publicAnonKey}`
+          },
+          body: JSON.stringify({ categories: customCategories })
+        }
+      );
+
+      if (!catResponse.ok) {
+        console.error('Failed to save custom categories:', catResponse.status, catResponse.statusText);
+        const errorData = await catResponse.json().catch(() => ({ error: 'Unknown error' }));
+        console.error('Category save error details:', errorData);
+      }
 
       onUpdate(editingAwardees);
       setSaveSuccess(true);
+      setIsSaved(true);
       
       // Reset success state after 3 seconds
       setTimeout(() => {
@@ -301,7 +512,8 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
       }, 3000);
     } catch (error) {
       console.error('Save error:', error);
-      alert('Failed to save changes');
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      alert(`Failed to save changes: ${errorMessage}\n\nPlease check the console for more details.`);
     } finally {
       setIsSaving(false);
     }
@@ -316,6 +528,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
   const handleRename = (index: number) => {
     setRenamingIndex(index);
     setRenameValue(editingAwardees[index].tabName || `Award ${index + 1}`);
+    setContextMenu(null);
   };
 
   const confirmRename = () => {
@@ -325,7 +538,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
         ...updated[renamingIndex],
         tabName: renameValue.trim()
       };
-      setEditingAwardees(updated);
+      updateAwardees(updated);
     }
     setRenamingIndex(null);
     setRenameValue('');
@@ -346,8 +559,9 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
     };
     const updated = [...editingAwardees];
     updated.splice(index + 1, 0, duplicated);
-    setEditingAwardees(updated);
+    updateAwardees(updated);
     setActiveTab(index + 1);
+    setContextMenu(null);
   };
 
   const handleToggleHide = (index: number) => {
@@ -356,8 +570,113 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
       ...updated[index],
       isHidden: !updated[index].isHidden
     };
-    setEditingAwardees(updated);
+    updateAwardees(updated);
+    setContextMenu(null);
   };
+
+  const handleAddCategory = () => {
+    if (newCategoryName.trim() && !allCategories.includes(newCategoryName.trim())) {
+      setCustomCategories([...customCategories, newCategoryName.trim()]);
+      setNewCategoryName('');
+      setIsAddingCategory(false);
+    }
+  };
+
+  const handleDeleteCategory = async (categoryToDelete: string) => {
+    const updatedCategories = customCategories.filter(cat => cat !== categoryToDelete);
+    setCustomCategories(updatedCategories);
+    
+    // Save to backend immediately
+    try {
+      await fetch(
+        `https://${projectId}.supabase.co/functions/v1/make-server-b6556629/custom-categories`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${publicAnonKey}`
+          },
+          body: JSON.stringify({ categories: updatedCategories })
+        }
+      );
+    } catch (error) {
+      console.error('Failed to delete category:', error);
+    }
+  };
+
+  // Handle panel resize
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizing) return;
+      
+      e.preventDefault();
+      
+      const newWidth = window.innerWidth - e.clientX;
+      const minWidth = Math.max(400, window.innerWidth * 0.25); // Minimum is 25% of viewport
+      const maxWidth = Math.max(600, window.innerWidth * 0.30); // Maximum is 30% of viewport
+      
+      const clampedWidth = Math.max(minWidth, Math.min(maxWidth, newWidth));
+      setPanelWidth(clampedWidth);
+      onWidthChange?.(clampedWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(false);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+
+    if (isResizing) {
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [isResizing, onWidthChange]);
+
+  // Notify parent when active tab changes in layout edit mode or when mode toggles
+  useEffect(() => {
+    if (onLayoutModeChange) {
+      onLayoutModeChange(isLayoutEditMode, activeTab, handleLayoutUpdate);
+    }
+  }, [activeTab, isLayoutEditMode]);
+
+  // Initialize layout positions for all elements when entering layout edit mode
+  useEffect(() => {
+    if (isLayoutEditMode && !initializedSlidesRef.current.has(activeTab)) {
+      // Define default positions for all elements
+      const defaultPositions = {
+        photo: { x: 100, y: 200, width: 400, height: 400 },
+        category: { x: 550, y: 60, width: 200, height: 80 },
+        date: { x: 780, y: 70, width: 200, height: 30 },
+        name: { x: 550, y: 160, width: 800, height: 80 },
+        title: { x: 550, y: 260, width: 800, height: 50 },
+        description: { x: 550, y: 340, width: 1200, height: 350 }
+      };
+
+      // Check if current slide needs layout initialization
+      const currentAwardee = editingAwardees[activeTab];
+      const needsInitialization = !currentAwardee.layout || Object.keys(currentAwardee.layout).length === 0;
+
+      if (needsInitialization) {
+        const updated = [...editingAwardees];
+        updated[activeTab] = {
+          ...updated[activeTab],
+          layout: { ...defaultPositions }
+        };
+        initializedSlidesRef.current.add(activeTab);
+        updateAwardees(updated);
+      } else {
+        // Mark as initialized even if it already has layout
+        initializedSlidesRef.current.add(activeTab);
+      }
+    }
+  }, [isLayoutEditMode, activeTab]);
 
   const currentAwardee = editingAwardees[activeTab];
 
@@ -368,31 +687,51 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
         animate={{ x: 0 }}
         exit={{ x: '100%' }}
         transition={{ type: 'spring', damping: 25 }}
-        className="fixed top-0 right-0 h-full w-full md:w-[600px] bg-slate-900 shadow-2xl z-50 overflow-hidden flex flex-col"
+        className="fixed top-0 right-0 h-full bg-slate-900 shadow-2xl z-50 overflow-hidden flex flex-col w-full md:w-auto"
+        style={{ width: window.innerWidth < 768 ? '100%' : `${panelWidth}px` }}
       >
+        {/* Resize Handle - Hidden on mobile */}
+        <div
+          onMouseDown={() => setIsResizing(true)}
+          className={`absolute left-0 top-0 bottom-0 w-2 hover:w-3 bg-blue-500/0 hover:bg-blue-500/50 cursor-col-resize transition-all group z-50 hidden md:block ${
+            isResizing ? 'w-3 bg-blue-500/70' : ''
+          }`}
+          title="Drag to resize panel"
+        >
+          <div className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 transition-opacity ${
+            isResizing ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}>
+            <GripVertical className="w-5 h-5 text-white drop-shadow-lg" />
+          </div>
+          {/* Resize indicator bar */}
+          <div className={`absolute inset-0 border-l-2 transition-colors ${
+            isResizing ? 'border-blue-400' : 'border-transparent group-hover:border-blue-400/50'
+          }`} />
+        </div>
         {/* Header */}
-        <div className="bg-slate-800 p-6 border-b border-slate-700">
+        <div className="bg-slate-800 p-4 sm:p-6 border-b border-slate-700">
           <div className="flex items-center justify-between mb-4">
-            <h2 className="text-2xl font-bold text-white">Edit Awards</h2>
-            <div className="flex items-center gap-3">
+            <h2 className="text-xl sm:text-2xl font-bold text-white">Edit Awards</h2>
+            <div className="flex items-center gap-2 sm:gap-3">
               <button
                 onClick={handleAddAwardee}
-                className="px-4 py-2 rounded-lg text-sm font-bold bg-green-600 hover:bg-green-700 text-white transition-colors flex items-center gap-2 shadow-lg"
+                className="px-3 sm:px-4 py-2 rounded-lg text-xs sm:text-sm font-bold bg-green-600 hover:bg-green-700 text-white transition-colors flex items-center gap-1 sm:gap-2 shadow-lg"
               >
-                <Plus className="w-5 h-5" />
-                Add New Award
+                <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="hidden sm:inline">Add New Award</span>
+                <span className="sm:hidden">Add</span>
               </button>
               <button
                 onClick={onClose}
                 className="p-2 hover:bg-slate-700 rounded-lg transition-colors"
               >
-                <X className="w-6 h-6 text-white" />
+                <X className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
               </button>
             </div>
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-2 overflow-x-auto pb-2">
+          <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-autohide">
             {editingAwardees.map((awardee, index) => (
               <div key={awardee.id} className="relative">
                 {renamingIndex === index ? (
@@ -451,22 +790,24 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
         </div>
 
         {/* Context Menu */}
-        {contextMenu && (
-          <TabContextMenu
-            x={contextMenu.x}
-            y={contextMenu.y}
-            isHidden={editingAwardees[contextMenu.index]?.isHidden || false}
-            onRename={() => handleRename(contextMenu.index)}
-            onDuplicate={() => handleDuplicate(contextMenu.index)}
-            onToggleHide={() => handleToggleHide(contextMenu.index)}
-            onDelete={() => handleDeleteAwardee(contextMenu.index)}
-            onClose={() => setContextMenu(null)}
-          />
-        )}
+        <AnimatePresence>
+          {contextMenu && (
+            <TabContextMenu
+              x={contextMenu.x}
+              y={contextMenu.y}
+              isHidden={editingAwardees[contextMenu.index]?.isHidden || false}
+              onRename={() => handleRename(contextMenu.index)}
+              onDuplicate={() => handleDuplicate(contextMenu.index)}
+              onToggleHide={() => handleToggleHide(contextMenu.index)}
+              onDelete={() => handleDeleteAwardee(contextMenu.index)}
+              onClose={() => setContextMenu(null)}
+            />
+          )}
+        </AnimatePresence>
 
         {/* Form */}
         {currentAwardee && (
-          <div className="flex-1 overflow-y-auto p-6 pb-32 space-y-6">
+          <div className="flex-1 overflow-y-auto p-6 pb-32 space-y-6 scrollbar-autohide">
             {/* Photo Upload */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
@@ -532,7 +873,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                             ...updated[activeTab], 
                             photoScale: parseInt(e.target.value) / 100
                           };
-                          setEditingAwardees(updated);
+                          updateAwardees(updated);
                         }}
                         className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
                       />
@@ -549,7 +890,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                               ...updated[activeTab], 
                               photoScale: 1
                             };
-                            setEditingAwardees(updated);
+                            updateAwardees(updated);
                           }}
                           className="w-full px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded text-xs"
                         >
@@ -562,19 +903,26 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
               </div>
             </div>
 
-            {/* Brand Logo Upload */}
+            {/* Organization Logo Upload (Bottom Right) */}
             <div>
               <label className="block text-sm font-medium text-slate-300 mb-2">
-                Brand Logo or Icon
+                Organization Logo (Bottom Right)
               </label>
+              {applyLogoToAll && activeTab !== 0 && (
+                <div className="mb-3 p-2 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                  <p className="text-xs text-blue-300">
+                    💡 Logo sync is active. Edit on Slide 1 to change all slides.
+                  </p>
+                </div>
+              )}
               <div className="space-y-4">
                 {/* Logo Upload */}
                 <div className="flex items-center gap-4">
-                  <div className="w-20 h-20 rounded-full overflow-hidden bg-slate-800 border-2 border-slate-700 flex items-center justify-center">
-                    {currentAwardee.brandLogo ? (
+                  <div className="w-20 h-20 rounded overflow-hidden bg-slate-800 border-2 border-slate-700 flex items-center justify-center">
+                    {currentAwardee.organizationLogo ? (
                       <img
-                        src={currentAwardee.brandLogo}
-                        alt="Brand logo"
+                        src={currentAwardee.organizationLogo}
+                        alt="Organization logo"
                         className="w-full h-full object-contain p-2"
                       />
                     ) : (
@@ -582,32 +930,54 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                     )}
                   </div>
                   <div className="flex-1 space-y-2">
-                    <label className="cursor-pointer px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors flex items-center gap-2 w-fit">
+                    <label className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 w-fit ${
+                      applyLogoToAll && activeTab !== 0
+                        ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
+                        : 'bg-blue-600 hover:bg-blue-700 text-white cursor-pointer'
+                    }`}>
                       <Upload className="w-4 h-4" />
                       {uploading ? 'Uploading...' : 'Upload Logo'}
                       <input
                         type="file"
                         accept="image/*"
                         className="hidden"
-                        disabled={uploading}
+                        disabled={uploading || (applyLogoToAll && activeTab !== 0)}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
-                          if (file) handleBrandLogoUpload(activeTab, file);
+                          if (file) handleOrganizationLogoUpload(activeTab, file);
                         }}
                       />
                     </label>
-                    {currentAwardee.brandLogo && (
+                    {currentAwardee.organizationLogo && (
                       <button
                         onClick={() => {
                           const updated = [...editingAwardees];
-                          updated[activeTab] = { 
-                            ...updated[activeTab], 
-                            brandLogo: undefined,
-                            brandLogoPath: undefined
-                          };
-                          setEditingAwardees(updated);
+                          
+                          if (applyLogoToAll && activeTab === 0) {
+                            // Remove logo from all slides if checkbox is checked and on Slide 1
+                            updated.forEach((_, i) => {
+                              updated[i] = {
+                                ...updated[i],
+                                organizationLogo: undefined,
+                                organizationLogoPath: undefined
+                              };
+                            });
+                          } else {
+                            // Remove only from current slide
+                            updated[activeTab] = { 
+                              ...updated[activeTab], 
+                              organizationLogo: undefined,
+                              organizationLogoPath: undefined
+                            };
+                          }
+                          updateAwardees(updated);
                         }}
-                        className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors flex items-center gap-2 w-fit text-sm"
+                        disabled={applyLogoToAll && activeTab !== 0}
+                        className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 w-fit text-sm ${
+                          applyLogoToAll && activeTab !== 0
+                            ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                            : 'bg-slate-700 hover:bg-slate-600 text-white'
+                        }`}
                       >
                         <X className="w-4 h-4" />
                         Remove Logo
@@ -616,7 +986,69 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                   </div>
                 </div>
 
-                {/* Badge Background Color Picker */}
+                {/* Logo Size Selection */}
+                <div>
+                  <label className="block text-sm text-slate-400 mb-2">
+                    Logo Size
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => handleLogoSizeChange('small')}
+                      className={`px-4 py-2 rounded-lg border transition-all ${
+                        (currentAwardee.organizationLogoSize || 'medium') === 'small'
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
+                      }`}
+                    >
+                      Small
+                    </button>
+                    <button
+                      onClick={() => handleLogoSizeChange('medium')}
+                      className={`px-4 py-2 rounded-lg border transition-all ${
+                        (currentAwardee.organizationLogoSize || 'medium') === 'medium'
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-slate-800 border-slate-700 text-slate-300 hover:border-slate-600'
+                      }`}
+                    >
+                      Medium
+                    </button>
+                  </div>
+                </div>
+
+                {/* Apply to All Checkboxes */}
+                <div className="space-y-2 pt-2 border-t border-slate-700">
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={applyLogoToAll}
+                      onChange={(e) => handleApplyLogoToAllChange(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+                    />
+                    <span className="text-sm text-slate-300 group-hover:text-white transition-colors">
+                      Apply logo from Slide 1 to all slides
+                    </span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={applySizeToAll}
+                      onChange={(e) => handleApplySizeToAllChange(e.target.checked)}
+                      className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+                    />
+                    <span className="text-sm text-slate-300 group-hover:text-white transition-colors">
+                      Apply size to all slides
+                    </span>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Icon Badge Section */}
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-2">
+                Category Icon Badge
+              </label>
+              <div className="space-y-4">{/* Badge Background Color Picker */}
                 <div>
                   <label className="block text-sm text-slate-400 mb-2">
                     Badge Background Color
@@ -697,7 +1129,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                             backgroundColor: e.target.value
                           }
                         };
-                        setEditingAwardees(updated);
+                        updateAwardees(updated);
                       }}
                       className="w-12 h-9 rounded cursor-pointer bg-slate-800 border border-slate-700"
                     />
@@ -713,7 +1145,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                             backgroundColor: e.target.value
                           }
                         };
-                        setEditingAwardees(updated);
+                        updateAwardees(updated);
                       }}
                       placeholder="#1e293b"
                       className="w-24 px-2 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -729,7 +1161,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                               backgroundColor: undefined
                             }
                           };
-                          setEditingAwardees(updated);
+                          updateAwardees(updated);
                         }}
                         className="px-2 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs"
                       >
@@ -757,7 +1189,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                             accentColorType: 'flat'
                           }
                         };
-                        setEditingAwardees(updated);
+                        updateAwardees(updated);
                       }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                         (currentAwardee.slideTheme?.accentColorType || 'gradient') === 'flat'
@@ -777,7 +1209,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                             accentColorType: 'gradient'
                           }
                         };
-                        setEditingAwardees(updated);
+                        updateAwardees(updated);
                       }}
                       className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
                         (currentAwardee.slideTheme?.accentColorType || 'gradient') === 'gradient'
@@ -804,7 +1236,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                               accentColor: e.target.value
                             }
                           };
-                          setEditingAwardees(updated);
+                          updateAwardees(updated);
                         }}
                         className="w-12 h-9 rounded cursor-pointer bg-slate-800 border border-slate-700"
                       />
@@ -820,7 +1252,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                               accentColor: e.target.value
                             }
                           };
-                          setEditingAwardees(updated);
+                          updateAwardees(updated);
                         }}
                         placeholder="#3b82f6"
                         className="w-24 px-2 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -836,7 +1268,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                                 accentColor: undefined
                               }
                             };
-                            setEditingAwardees(updated);
+                            updateAwardees(updated);
                           }}
                           className="px-2 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs"
                         >
@@ -862,7 +1294,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                                   accentColor: e.target.value
                                 }
                               };
-                              setEditingAwardees(updated);
+                              updateAwardees(updated);
                             }}
                             className="w-12 h-9 rounded cursor-pointer bg-slate-800 border border-slate-700"
                           />
@@ -878,7 +1310,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                                   accentColor: e.target.value
                                 }
                               };
-                              setEditingAwardees(updated);
+                              updateAwardees(updated);
                             }}
                             placeholder="#3b82f6"
                             className="w-24 px-2 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -902,7 +1334,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                                   accentColorEnd: e.target.value
                                 }
                               };
-                              setEditingAwardees(updated);
+                              updateAwardees(updated);
                             }}
                             className="w-12 h-9 rounded cursor-pointer bg-slate-800 border border-slate-700"
                           />
@@ -918,7 +1350,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                                   accentColorEnd: e.target.value
                                 }
                               };
-                              setEditingAwardees(updated);
+                              updateAwardees(updated);
                             }}
                             placeholder="#22d3ee"
                             className="w-24 px-2 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -939,7 +1371,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                                 accentColorEnd: undefined
                               }
                             };
-                            setEditingAwardees(updated);
+                            updateAwardees(updated);
                           }}
                           className="w-full px-2 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-xs"
                         >
@@ -982,7 +1414,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                             [key]: e.target.checked
                           }
                         };
-                        setEditingAwardees(updated);
+                        updateAwardees(updated);
                       }}
                       className="w-4 h-4 rounded border-2 border-slate-600 bg-slate-800/50 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
                     />
@@ -994,6 +1426,47 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                 <p className="text-xs text-blue-300">
                   💡 Tip: Hide elements you don't want to show for this particular award. This gives you full control over each slide's content.
                 </p>
+              </div>
+            </div>
+
+            {/* Layout Controls */}
+            <div className="border-t border-slate-700 pt-6">
+              <label className="block text-sm font-medium text-slate-300 mb-3">
+                Layout Customization
+              </label>
+              <p className="text-xs text-slate-400 mb-4">
+                Customize the position and size of elements on this slide
+              </p>
+              
+              <div className="space-y-3">
+                {/* Reset Layout Button */}
+                <button
+                  onClick={handleResetLayout}
+                  className="w-full px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors text-sm"
+                >
+                  Reset to Default Layout
+                </button>
+
+                {/* Copy Layout from Slide 1 Checkbox */}
+                <label className="flex items-center gap-2 cursor-pointer group pt-2 border-t border-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={copyLayoutToAll}
+                    onChange={(e) => handleCopyLayoutToAllChange(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-600 bg-slate-800 text-blue-600 focus:ring-2 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <span className="text-sm text-slate-300 group-hover:text-white transition-colors">
+                    Copy layout from Slide 1 to all slides
+                  </span>
+                </label>
+
+                {copyLayoutToAll && activeTab !== 0 && (
+                  <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-2">
+                    <p className="text-xs text-blue-300">
+                      💡 Layout sync is active. Edit on Slide 1 to change all slides.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1039,6 +1512,73 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                   </option>
                 ))}
               </select>
+              
+              {/* Add Category Button */}
+              {!isAddingCategory ? (
+                <button
+                  onClick={() => setIsAddingCategory(true)}
+                  className="mt-2 w-full px-3 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors flex items-center justify-center gap-2 text-sm"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add New Category
+                </button>
+              ) : (
+                <div className="mt-2 space-y-2">
+                  <input
+                    type="text"
+                    value={newCategoryName}
+                    onChange={(e) => setNewCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAddCategory();
+                      if (e.key === 'Escape') {
+                        setIsAddingCategory(false);
+                        setNewCategoryName('');
+                      }
+                    }}
+                    placeholder="Enter category name..."
+                    autoFocus
+                    className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      onClick={handleAddCategory}
+                      className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
+                    >
+                      Add
+                    </button>
+                    <button
+                      onClick={() => {
+                        setIsAddingCategory(false);
+                        setNewCategoryName('');
+                      }}
+                      className="flex-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm font-medium"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Custom Categories List */}
+              {customCategories.length > 0 && (
+                <div className="mt-3 space-y-1">
+                  <p className="text-xs text-slate-400 mb-1">Custom Categories:</p>
+                  {customCategories.map((cat) => (
+                    <div
+                      key={cat}
+                      className="flex items-center justify-between bg-slate-800/50 px-3 py-1.5 rounded-lg group"
+                    >
+                      <span className="text-sm text-slate-300">{cat}</span>
+                      <button
+                        onClick={() => handleDeleteCategory(cat)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-slate-700 rounded"
+                      >
+                        <X className="w-3.5 h-3.5 text-red-400" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Date */}
@@ -1089,7 +1629,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                       ...updated[activeTab], 
                       descriptionTextSize: parseInt(e.target.value)
                     };
-                    setEditingAwardees(updated);
+                    updateAwardees(updated);
                   }}
                   className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
                 />
@@ -1106,7 +1646,7 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
                         ...updated[activeTab], 
                         descriptionTextSize: 13
                       };
-                      setEditingAwardees(updated);
+                      updateAwardees(updated);
                     }}
                     className="w-full px-3 py-1 bg-slate-700 hover:bg-slate-600 text-white rounded text-xs"
                   >
@@ -1140,15 +1680,15 @@ export function EditorPanel({ awardees, onUpdate, onClose }: EditorPanelProps) {
             </button>
             <button
               onClick={handleSave}
-              disabled={isSaving || saveSuccess}
+              disabled={isSaving || isSaved}
               className={`flex-1 px-4 py-3 rounded-lg transition-all flex items-center justify-center gap-2 disabled:opacity-50 ${
-                saveSuccess
+                isSaved
                   ? 'bg-green-600 text-white'
                   : 'bg-blue-600 hover:bg-blue-700 text-white'
               }`}
             >
-              <Save className="w-4 h-4" />
-              {isSaving ? 'Saving...' : saveSuccess ? 'Changes Saved!' : 'Save Changes'}
+              {isSaved ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+              {isSaving ? 'Saving...' : isSaved ? 'Changes Saved!' : 'Save Changes'}
             </button>
           </div>
         </div>

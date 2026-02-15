@@ -183,3 +183,37 @@
 html {
   font-size: var(--font-size);
 }
+
+/* Auto-hiding scrollbars - only appear on hover */
+.scrollbar-autohide {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+  transition: scrollbar-color 0.3s ease;
+}
+
+.scrollbar-autohide::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.scrollbar-autohide::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-autohide::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border-radius: 4px;
+  transition: background-color 0.3s ease;
+}
+
+.scrollbar-autohide:hover {
+  scrollbar-color: rgba(148, 163, 184, 0.5) transparent;
+}
+
+.scrollbar-autohide:hover::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.5);
+}
+
+.scrollbar-autohide:hover::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.7);
+}
